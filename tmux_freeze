@@ -1,0 +1,96 @@
+#!/bin/sh
+# TMUX Freeze - Criu checkpoint/restore for tmux servers; https://github.com/c0rner/dotfiles
+#
+# Installation and setup
+# ~~~~~~~~~~~~~~~~~~~~~~
+# Keep your tmux servers running even after reboot. This script will checkpoint/restore
+# all running tmux servers using 'criu' on a system with a 3.11 kernel or greater.
+# Perfect for systems needing regular patching and you wish to keep your sessions running.
+#
+# Install this script in /sbin/tmux_freeze or /usr/sbin/tmux_freeze and call it from
+# a cronjob doing patching.
+#
+# NOTE: Criu will set up rules in iptables dropping any packets related to sockets in the
+# dumped process(es). These must be preserved for tcp sessions to survive a reboot. Once
+# the process(es) is restored criu will remove the rules for you.
+#
+# Example scripts (very simple, for use on rhel systems):
+# patch_begin - Called before rebooting after a yum update
+#     #!/bin/sh
+#     echo "Patching in progress.." > /etc/nologin
+#     /sbin/tmux_freeze checkpoint
+#     service iptables save
+#
+# patch_finish - Called from /etc/rc.local at boot (backgrounded)
+#     #!/bin/sh
+#     sleep 30
+#     /sbin/tmux_freeze restore >/dev/null 2>&1
+#     service iptables save >/dev/null 2>&1
+#     rm -f /etc/nologin >/dev/null 2>&1
+
+# TMUX settings
+Tmux="tmux"
+Tmuxbase="/tmp/${Tmux}-"
+Tmuxsocket="default"
+
+# CRIU settings
+Criu="/usr/sbin/criu"
+Images="/var/tmp/criu"
+
+dump() {
+# Remove any old images if present
+rm -Rf "${Images}/"*
+
+[ -d "${Tmuxbase}" ] && ls -d "${Tmuxbase}"* | while read folder; do
+	declare -i uid="${folder#*-}"
+	socket="${folder}/${Tmuxsocket}"
+	if [ -S "${socket}" ]; then
+		if [ $uid -eq $(stat -c "%g" "${socket}") ]; then
+			# Get pid of tmux-server
+			declare -i pid=$(fuser "${socket}" 2>/dev/null)
+			[ ${pid} -eq 0 ] && continue
+
+			# Verofy name of command, skip if no match
+			[ "${Tmux}" != "$(cat /proc/${pid}/comm)" ] && continue
+
+			# Make sure all sessions are detached
+			tmux -S ${socket} detach
+
+			echo "Found running TMUX server for userid '$uid' running with pid '$pid'"
+			dumpdir="${Images}/${uid}-${pid}"
+			if [ -d "${dumpdir}" ]; then
+				chmod 0700 "${dumpdir}"
+			else
+				mkdir -p -m 0700 "${dumpdir}"
+			fi
+
+			echo "Dumping process ${pid}"
+			${Criu} dump -t ${pid} -D ${dumpdir} -v3 -o tmuxdump.log --tcp-established
+		fi
+	fi
+done
+}
+
+restore() {
+ls "${Images}" | while read dump; do
+	dumpdir="${Images}/${dump}"
+	echo -n "Restoring process '${dump}' - "
+	${Criu} restore -d -D ${dumpdir} -v3 -o tmuxrestore.log --tcp-established
+	if [ $? -eq 0 ]; then
+		echo "OK"
+		rm -Rf "${dumpdir}"
+	else
+		echo "FAILED"
+	fi
+done
+}
+
+case "${1,,}" in
+	checkpoint|dump)
+		dump
+		echo "Dump finished! Don't forget to save iptable state!"
+		;;
+	restore)
+		restore
+		;;
+esac
