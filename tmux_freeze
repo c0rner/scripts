@@ -7,8 +7,8 @@
 # all running tmux servers using 'criu' on a system with a 3.11 kernel or greater.
 # Perfect for systems needing regular patching and you wish to keep your sessions running.
 #
-# Install this script in /sbin/tmux_freeze or /usr/sbin/tmux_freeze and call it from
-# a cronjob doing patching.
+# Install this script in /usr/sbin/tmux_freeze or where ever you please and call it from
+# your patching agent before rebooting the server.
 #
 # NOTE: Criu will set up rules in iptables dropping any packets related to sockets in the
 # dumped process(es). These must be preserved for tcp sessions to survive a reboot. Once
@@ -39,9 +39,10 @@ Images="/var/tmp/criu"
 
 dump() {
 # Remove any old images if present
-rm -Rf "${Images}/"*
+[ -d "${Images}" ] && rm -Rf "${Images}/"*
 
-[ -d "${Tmuxbase}" ] && ls -d "${Tmuxbase}"* | while read folder; do
+# Iterate all running tmux servers and dump to disk
+ls -d "${Tmuxbase}"* 2>/dev/null | while read folder; do
 	declare -i uid="${folder#*-}"
 	socket="${folder}/${Tmuxsocket}"
 	if [ -S "${socket}" ]; then
@@ -56,7 +57,7 @@ rm -Rf "${Images}/"*
 			# Make sure all sessions are detached
 			tmux -S ${socket} detach
 
-			echo "Found running TMUX server for userid '$uid' running with pid '$pid'"
+			echo -n "Dumping running TMUX server for userid '$uid' running with pid '$pid' - "
 			dumpdir="${Images}/${uid}-${pid}"
 			if [ -d "${dumpdir}" ]; then
 				chmod 0700 "${dumpdir}"
@@ -64,15 +65,14 @@ rm -Rf "${Images}/"*
 				mkdir -p -m 0700 "${dumpdir}"
 			fi
 
-			echo "Dumping process ${pid}"
-			${Criu} dump -t ${pid} -D ${dumpdir} -v3 -o tmuxdump.log --tcp-established
+			${Criu} dump -t ${pid} -D ${dumpdir} -v3 -o tmuxdump.log --tcp-established && echo OK || echo FAILED
 		fi
 	fi
 done
 }
 
 restore() {
-ls "${Images}" | while read dump; do
+[ -d "${Images}" ] && ls "${Images}" | while read dump; do
 	dumpdir="${Images}/${dump}"
 	echo -n "Restoring process '${dump}' - "
 	${Criu} restore -d -D ${dumpdir} -v3 -o tmuxrestore.log --tcp-established
