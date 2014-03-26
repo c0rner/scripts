@@ -1,0 +1,55 @@
+#!/bin/sh
+# Note: Script to build vmware kernel modules from source
+
+# Verify that we can read the source tarball
+[ -r "${1}" ] || { echo "error: unable to read vmware-tools tarball '${1}'"; exit 1; }
+
+# Set failure flag to zero
+Failure=0
+
+# We need the full path to the file
+Source=$(readlink -f "$1")
+
+# Create a temporary working directory
+Buildtmp=$(mktemp -d) || { echo "error: unable to create temporary path '${Buildtmp}'"; exit 1; }
+trap 'rm -Rf "${Buildtmp}"' EXIT
+
+
+# Change current working directory and build modules from source
+cd ${Buildtmp}
+
+# Extract tarball and the individual module sources
+echo "Extracting VMWare Tools"
+tar -zxf "${Source}" vmware-tools-distrib/lib/modules/source
+ls "vmware-tools-distrib/lib/modules/source/"*tar | while read tarball; do
+	tar -xf "${tarball}"
+done
+
+# Compile all the modules
+Modules=$(ls -d *only)
+echo "Building modules:"
+for module in ${Modules}; do
+	echo -n "${module%%-only} - "
+
+	# VMWARE BUG 398801 VSock needs access to VMCI build dir.
+	[ "${module}" = "vsock-only" ] && cp vmci-only/Module.symvers "${module}"
+
+	make -C "${module}" auto-build >"${module}.buildlog" 2>&1
+	if [ $? -eq 0 ]; then
+		echo "OK"
+	else
+		echo "FAILED"
+		Failure=1
+	fi
+done
+
+# Build of modules completed, restore current working directory
+cd ${OLDPW}
+
+# Build module package
+# echo -e "#define __KERNEL__\n#include <linux/autoconf.h>\n#include <asm/page.h>\nDERP __PAGE_OFFSET\n" | gcc -E -I/lib/modules/$(uname -r)/source/arch/x86/include -I/lib/modules/$(uname -r)/source/include -|grep DERP
+
+(cd ${Buildtmp}; ls *.o | cpio -ocR root:root --quiet) | bzip2 -z9 > "vmtools-$(uname -r).cpio"
+
+# If there were any failures kill ourselves thus not deleting working directory
+[ ${Failure} -ne 0 ] && echo "Build failed, have a look in ${Buildtmp}" && kill $$
