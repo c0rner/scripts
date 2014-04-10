@@ -1,0 +1,133 @@
+#!/bin/sh
+# TMUX SAVE - Save all running tmux sessions; https://github.com/c0rner/scripts
+# 
+# pane_active               1 if active pane
+# pane_dead                 1 if pane is dead
+# pane_height               Height of pane
+# pane_id                   Unique pane id
+# pane_pid                  PID of first process in pane
+# pane_start_command        Command pane started with
+# pane_start_path           Path pane started with
+# pane_title                Title of pane
+# pane_tty                  Pseudo terminal of pane
+# pane_width                Width of pane
+# session_attached          1 if session attached
+# session_created           Integer time session created
+# session_created_string    String time session created
+# session_group             Number of session group
+# session_grouped           1 if session in a group
+# session_height            Height of session
+# session_name              Name of session
+# session_width             Width of session
+# session_windows           Number of windows in session
+# window_active             1 if window active
+# window_flags              Window flags
+# window_height             Height of window
+# window_index              Index of window
+# window_layout             Window layout description
+# window_name               Name of window
+# window_width              Width of window
+#H                Hostname of local host
+#h                Hostname of local host without the domain name
+#F                Current window flag
+#I                Current window index
+#P                Current pane index
+#S                Session name
+#T                Current pane title
+#W                Current window name
+##                A literal ‘#’
+
+FS="^"
+IFS="
+"
+OLDIFS="${IFS}"
+
+# Disable pathname expansion
+set -f
+
+getOptions() {
+   tmux show-options -g -t $1
+}
+
+getWindowOptions() {
+   tmux show-window-options -g -t $1
+}
+
+getPanes() {
+   local target=$1
+
+   [ -z $1 ] && return
+   tmux list-panes -t "$1" -F "#P${FS}#T${FS}#{pane_pid}${FS}#{pane_start_path}${FS}#{pane_start_command}"
+}
+
+getWindows() {
+   [ -z $1 ] && return
+   tmux list-windows -t "$1" -F "#I${FS}#W${FS}#F${FS}#{window_layout}"
+}
+
+getSessions() {
+   tmux list-sessions -F "#S"
+}
+
+savePane() {
+   local target=$1
+   local -i baseid=$2
+   local -i newid=$3
+   IFS=${FS}; set $4; IFS=${OLDIFS}
+
+   # First pane is created at window creation and needs to be skipped
+   [ ${newid} -gt ${baseid} ] && echo "tmux split-window -t \"${target}.$((newid - 1))\""
+
+   # Prepare command string
+   local command="$5"
+   if [ -z "${command}" ]; then
+      # FIXME: This will only get first pid from the list
+      declare -i pid=$(ps ao "ppid,pid" | awk "/^$3/{ print \$2; exit }")
+      if [ "${pid}" -gt 1 ]; then
+         command=$(cat /proc/${pid}/cmdline | awk '{gsub(/\0/, " "); print}')
+      fi
+   fi
+   # Injec command if we discovered something running
+   [ -n "${command}" ] && echo "tmux send-keys -t \"${target}.${newid}\" \"${command}\" C-m"
+}
+
+saveWindow() {
+   local target=$1
+   local -i index=$2
+   local -i panebase=$(getWindowOptions $1 | awk '/pane-base-index/{print $2}')
+   local -i paneid=${panebase}
+   local pane
+   IFS=${FS}; set $3; IFS=${OLDIFS}
+
+   # First window is created at session creation and needs to be moved,renamed
+   if [ ${index} -eq 0 ]; then
+      local -i winbase=$(getOptions $1 | awk '/base-index/{print $2}')
+      [ $1 -ne ${winbase} ] && echo "tmux move-window -d -s \"${target}:${winbase}\" -t \"${target}:$1\""
+      echo "tmux rename-window -t \"${target}:$1\" \"$2\""
+   else
+      echo "tmux new-window -d -t \"${target}:$1\" -n \"$2\""
+   fi
+
+   for pane in $(getPanes "${target}:$1"); do
+      savePane "${target}:$1" "${panebase}" "${paneid}" "${pane}"
+      paneid=$((paneid + 1))
+   done
+   echo "tmux select-layout -t \"${target}:$1\" \"$4\""
+}
+
+saveSession() {
+   local target=$1
+   local -i index=0
+   local window
+
+   echo "tmux new-session -d -s \"${target}\""
+   for window in $(getWindows "${target}"); do
+      saveWindow "${target}" "${index}" "$window"
+      index=$((index + 1))
+   done
+}
+
+declare Sessions=$(getSessions)
+for session in ${Sessions}; do
+   saveSession ${session}
+done
