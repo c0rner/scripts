@@ -37,7 +37,7 @@
 #W                Current window name
 ##                A literal ‘#’
 
-FS="^"
+FS=$(echo -ne "\05")
 IFS="
 "
 OLDIFS="${IFS}"
