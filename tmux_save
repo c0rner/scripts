@@ -1,5 +1,5 @@
 #!/bin/sh
-# TMUX SAVE - Save all running tmux sessions; https://github.com/c0rner/scripts
+# TMUX SAVE - Save running tmux sessions; https://github.com/c0rner/scripts
 # 
 # pane_active               1 if active pane
 # pane_dead                 1 if pane is dead
@@ -37,14 +37,6 @@
 #W                Current window name
 ##                A literal ‘#’
 
-FS=$(echo -ne "\05")
-IFS="
-"
-OLDIFS="${IFS}"
-
-# Disable pathname expansion
-set -f
-
 getOptions() {
    tmux show-options -g -t $1
 }
@@ -71,63 +63,81 @@ getSessions() {
 
 savePane() {
    local target=$1
-   local -i baseid=$2
-   local -i newid=$3
-   IFS=${FS}; set $4; IFS=${OLDIFS}
+   local -i window=$2
+   local -i baseid=$3
+   IFS=${FS}; set $4; IFS=${Newifs}
 
-   # First pane is created at window creation and needs to be skipped
-   [ ${newid} -gt ${baseid} ] && echo "tmux split-window -t \"${target}.$((newid - 1))\""
+   if [ "${CurrentPath}" != "$4" ]; then
+      CurrentPath="$4"
+      echo "# New working directory"
+      echo "cd \"${CurrentPath}\""
+   fi
+
+   if [ ${WindowIndex} -eq 0 -a ${PaneIndex} -eq 0 ]; then
+      local -i winbase=$(getOptions "${target}" | awk '/base-index/{print $2}')
+      echo "# [${target}:${window}.${baseid}] - New session"
+      echo "tmux new-session -d -s \"${target}\" -n \"$2\""
+      [ ${window} -ne ${winbase} ] && echo "tmux move-window -d -s \"${target}:${winbase}\" -t \"${target}:${window}\""
+   elif [ ${PaneIndex} -eq 0 ]; then
+      echo "# [${target}:${window}.$1] - New window"
+      echo "tmux new-window -d -t \"${target}:${window}\" -n \"$2\""
+   else
+      echo "# [${target}.$(( PaneIndex + ${baseid} ))] - New pane"
+      echo "tmux split-window -t \"${target}:${window}.$(( PaneIndex + baseid - 1 ))\""
+   fi
 
    # Prepare command string
    local command="$5"
    if [ -z "${command}" ]; then
       # FIXME: This will only get first pid from the list
-      declare -i pid=$(ps ao "ppid,pid" | awk "/^$3/{ print \$2; exit }")
+      local -i pid=$(ps ao "ppid,pid" | awk "/^ ?$3/{ print \$2; exit }")
       if [ "${pid}" -gt 1 ]; then
+         echo "# Command extracted from /proc/${pid}/cmdline"
          command=$(cat /proc/${pid}/cmdline | awk '{gsub(/\0/, " "); print}')
       fi
    fi
-   # Injec command if we discovered something running
-   [ -n "${command}" ] && echo "tmux send-keys -t \"${target}.${newid}\" \"${command}\" C-m"
+
+   # Inject command if we discovered something running
+   [ -n "${command}" ] && echo "tmux send-keys -t \"${target}:${window}.$(( PaneIndex + baseid ))\" \"${command}\" C-m"
 }
 
 saveWindow() {
    local target=$1
-   local -i index=$2
-   local -i panebase=$(getWindowOptions $1 | awk '/pane-base-index/{print $2}')
-   local -i paneid=${panebase}
+   local -i panebase=$(getWindowOptions "${target}" | awk '/pane-base-index/{print $2}')
    local pane
-   IFS=${FS}; set $3; IFS=${OLDIFS}
+   IFS=${FS}; set $2; IFS=${Newifs}
 
-   # First window is created at session creation and needs to be moved,renamed
-   if [ ${index} -eq 0 ]; then
-      local -i winbase=$(getOptions $1 | awk '/base-index/{print $2}')
-      [ $1 -ne ${winbase} ] && echo "tmux move-window -d -s \"${target}:${winbase}\" -t \"${target}:$1\""
-      echo "tmux rename-window -t \"${target}:$1\" \"$2\""
-   else
-      echo "tmux new-window -d -t \"${target}:$1\" -n \"$2\""
-   fi
-
+   PaneIndex=0
    for pane in $(getPanes "${target}:$1"); do
-      savePane "${target}:$1" "${panebase}" "${paneid}" "${pane}"
-      paneid=$((paneid + 1))
+      savePane "${target}" "$1" "${panebase}" "${pane}"
+      PaneIndex=$(( PaneIndex + 1 ))
    done
+
    echo "tmux select-layout -t \"${target}:$1\" \"$4\""
 }
 
 saveSession() {
-   local target=$1
-   local -i index=0
+   local target="$1"
+   local -i widx=0
    local window
 
-   echo "tmux new-session -d -s \"${target}\""
+   WindowIndex=0
    for window in $(getWindows "${target}"); do
-      saveWindow "${target}" "${index}" "$window"
-      index=$((index + 1))
+      saveWindow "${target}" "${window}"
+      WindowIndex=$(( WindowIndex + 1 ))
    done
+   echo ""
 }
 
-declare Sessions=$(getSessions)
+Newifs="
+"
+IFS="${Newifs}"
+FS=$(echo -ne "\05")
+
+# Disable pathname expansion
+set -f
+
+declare -a Sessions=$(getSessions)
 for session in ${Sessions}; do
    saveSession ${session}
 done
