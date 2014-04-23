@@ -95,12 +95,11 @@ savePane() {
    tmux capture-pane -S -${HistoryLines} -t "${pane}"
    tmux save-buffer "/tmp/tmux_save.$$"
    tmux delete-buffer
-   echo "mkfifo /tmp/fifo.$$"
-   echo "tmux send-keys -t \"${pane}\" \"cat /tmp/fifo.$$\" C-m"
-   echo "base64 -d << EOB | bunzip2 -cd > /tmp/fifo.$$"
+   echo "tmux send-keys -t \"${pane}\" \"cat ${TmuxFifo}\" C-m"
+   echo "base64 -d << EOB | bunzip2 -cd > \"${TmuxFifo}\""
    bzip2 -c "/tmp/tmux_save.$$" | base64
+   rm -f "/tmp/tmux_save.$$"
    echo "EOB"
-   echo "rm -f /tmp/fifo.$$"
 
    # Prepare command string
    local command="$4"
@@ -151,11 +150,16 @@ Newifs="
 IFS="${Newifs}"
 FS=$(echo -ne "\05")
 HistoryLines=200
+TmuxFifo="\${HOME}/tmux_fifo.\$\$"
 
 # Disable pathname expansion
 set -f
 
-declare -a Sessions=$(getSessions)
-for session in ${Sessions}; do
+echo "# Setup fifo pipe"
+echo "mkfifo \"${TmuxFifo}\""
+for session in $(getSessions); do
    saveSession ${session}
 done
+
+echo "# Remove fifo pipe"
+echo "rm -f \"${TmuxFifo}\""
