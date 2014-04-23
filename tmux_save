@@ -61,6 +61,19 @@ getSessions() {
    tmux list-sessions -F "#S"
 }
 
+savePaneHistory() {
+   # Save the last $HistoryLines lines from pane history
+   echo "# Restore pane history (last ${HistoryLines} lines)"
+   tmux capture-pane -S -${HistoryLines} -t "$1"
+   tmux save-buffer "/tmp/tmux_save.$$"
+   tmux delete-buffer
+   echo "tmux send-keys -t \"$1\" \"cat ${TmuxFifo}\" C-m"
+   echo "base64 -d << EOB | bunzip2 -cd > \"${TmuxFifo}\""
+   bzip2 -c "/tmp/tmux_save.$$" | base64
+   rm -f "/tmp/tmux_save.$$"
+   echo "EOB"
+}
+
 savePane() {
    local target=$1
    local -i window=$2
@@ -70,7 +83,7 @@ savePane() {
    local pane="${target}:${window}.$(( PaneIndex + ${baseid} ))"
    local cwd=$(readlink "/proc/$3/cwd")
 
-   # This is not good enough, we need to extract cwd from /proc/x/cwd using readlink
+   # Save current working directory for this pane
    if [ "${CurrentPath}" != "${cwd}" ]; then
       CurrentPath="$cwd"
       echo "# New working directory"
@@ -90,16 +103,7 @@ savePane() {
       echo "tmux split-window -t \"${target}:${window}.$(( PaneIndex + baseid - 1 ))\""
    fi
 
-   # Save the last $HistoryLines lines from pane history
-   echo "# Restore pane history (last ${HistoryLines} lines)"
-   tmux capture-pane -S -${HistoryLines} -t "${pane}"
-   tmux save-buffer "/tmp/tmux_save.$$"
-   tmux delete-buffer
-   echo "tmux send-keys -t \"${pane}\" \"cat ${TmuxFifo}\" C-m"
-   echo "base64 -d << EOB | bunzip2 -cd > \"${TmuxFifo}\""
-   bzip2 -c "/tmp/tmux_save.$$" | base64
-   rm -f "/tmp/tmux_save.$$"
-   echo "EOB"
+   savePaneHistory "${pane}"
 
    # Prepare command string
    local command="$4"
