@@ -1,5 +1,5 @@
 #!/bin/sh
-# TMUX Freeze - Criu checkpoint/restore for tmux servers; https://github.com/c0rner/dotfiles
+# TMUX Freeze - Criu checkpoint/restore for tmux servers; https://github.com/c0rner/scripts
 #
 # Installation and setup
 # ~~~~~~~~~~~~~~~~~~~~~~
