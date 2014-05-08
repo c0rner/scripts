@@ -149,7 +149,10 @@ savePane() {
    fi
 
    # Inject command if we discovered something running
-   [ -n "${command}" ] && echo "tmux send-keys -t \"${pane}\" \"${command}\" C-m"
+   if [ -n "${command}" ]; then
+      echo "# CAUTION! '${command}' will be executed in '${CurrentPath}'"
+      echo "tmux send-keys -t \"${pane}\" \"${command}\" C-m"
+   fi
 }
 
 saveWindow() {
@@ -198,6 +201,12 @@ set -f
 getVersion
 
 # Begin output
+echo "# Warn about commands to be executed"
+echo 'if [ "$1" != "--nowarn" ]; then'
+echo 'grep "CAUTION\!" $0'
+echo 'read -p "Press enter to restore session!"'
+echo 'fi'
+
 echo "# Setup fifo pipe"
 echo "mkfifo \"${TmuxFifo}\""
 
