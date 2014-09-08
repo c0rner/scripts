@@ -52,4 +52,4 @@ cd ${OLDPW}
 (cd ${Buildtmp}; ls *.o | cpio -ocR root:root --quiet) | bzip2 -z9 > "vmtools-$(uname -r).cpio"
 
 # If there were any failures kill ourselves thus not deleting working directory
-[ ${Failure} -ne 0 ] && echo "Build failed, have a look in ${Buildtmp}" && kill $$
+[ ${Failure} -ne 0 ] && echo "Build failed, have a look in ${Buildtmp}" && trap '' EXIT
