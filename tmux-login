@@ -1,0 +1,32 @@
+#!/bin/sh
+# TMUX-LOGIN - Login shell wrapper for tmux; https://github.com/c0rner/scripts
+#
+# Simplifies using tmux as a login shell by extracting all session logic into
+# this wrapper script.
+#
+# Attach to the currently running tmux server or, if there are no sessions
+# available, create a new named 'Login' and attach it.
+#
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+# Interactive shell or executing a command?
+if [ "${1}" = "-c" ]; then
+	shift
+	exec /bin/sh -c "$*"
+fi
+
+# Check if there are any sessions running
+if tmux -q has-session 2>/dev/null; then
+   # For some reason 'has-session' on TMUX 1.6 will return ok even though
+   # there are no sessions running so we need to double-check.
+   typeset -i sessions=$(tmux list-sessions | wc -l)
+   if [ ${sessions} -gt 0 ]; then
+      # Now we know there is at least one session to attach
+      exec tmux attach
+   fi
+fi
+
+# No running sessions were found, kill the tmux server (if running)
+# and proceed to create a new login session
+tmux kill-server
+exec tmux new -s Login
